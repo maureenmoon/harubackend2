@@ -21,7 +21,7 @@ import java.util.List;
 
 public class JWTCheckFilter extends OncePerRequestFilter {
 
-	private static final Logger log = LoggerFactory.getLogger(JWTCheckFilter.class);
+    private static final Logger log = LoggerFactory.getLogger(JWTCheckFilter.class);
     private final JWTUtil jwtUtil;
 
     public JWTCheckFilter(JWTUtil jwtUtil) {
@@ -34,6 +34,14 @@ public class JWTCheckFilter extends OncePerRequestFilter {
                                     FilterChain filterChain)
             throws ServletException, IOException {
 
+        // Skip JWT processing for logout and public endpoints
+        String requestURI = request.getRequestURI();
+        if (shouldSkipJWTProcessing(requestURI)) {
+            log.info("🔧 JWT Filter: Skipping JWT processing for: {}", requestURI);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         String token = null;
         
         // First try to get token from cookies (preferred method)
@@ -43,7 +51,7 @@ public class JWTCheckFilter extends OncePerRequestFilter {
         if (cookies != null) {
             log.info("🔧 JWT Filter: Found {} cookies", cookies.length);
             for (Cookie cookie : cookies) {
-                log.info("🔧 JWT Filter: Cookie {} = {} (Domain: {}, Path: {})", cookie.getName(), 
+                log.info("�� JWT Filter: Cookie {} = {} (Domain: {}, Path: {})", cookie.getName(), 
                     "accessToken".equals(cookie.getName()) ? cookie.getValue().substring(0, Math.min(20, cookie.getValue().length())) + "..." : "***",
                     cookie.getDomain(), cookie.getPath());
                 if ("accessToken".equals(cookie.getName())) {
@@ -86,7 +94,8 @@ public class JWTCheckFilter extends OncePerRequestFilter {
         }
 
         // If no accessToken found but refreshToken exists, try to refresh
-        if (token == null && refreshToken != null) {
+        // BUT only for authenticated endpoints, not for logout
+        if (token == null && refreshToken != null && !isLogoutRequest(requestURI)) {
             log.info("🔧 JWT Filter: No accessToken found, but refreshToken exists. Attempting to refresh...");
             log.info("🔧 JWT Filter: refreshToken length: {}", refreshToken.length());
             try {
@@ -120,18 +129,43 @@ public class JWTCheckFilter extends OncePerRequestFilter {
         }
 
         try {
-        	Long memberId = jwtUtil.extractMemberIdFromToken(token);  // validate and extract claims
+            Long memberId = jwtUtil.extractMemberIdFromToken(token);  // validate and extract claims
             List<GrantedAuthority> roles = jwtUtil.extractRoles(token);
 
             UsernamePasswordAuthenticationToken authToken =
-            	    new UsernamePasswordAuthenticationToken(memberId, null, roles);
+                    new UsernamePasswordAuthenticationToken(memberId, null, roles);
 
-            	SecurityContextHolder.getContext().setAuthentication(authToken);
+            SecurityContextHolder.getContext().setAuthentication(authToken);
             log.info("✅ JWT authenticated. MemberId: {}, Roles: {}", memberId, roles);
 
         } catch (Exception e) {
             log.warn("❌ Token validation failed: {}", e.getMessage());
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Check if JWT processing should be skipped for this request
+     */
+    private boolean shouldSkipJWTProcessing(String requestURI) {
+        return requestURI.startsWith("/api/health") ||
+               requestURI.startsWith("/api/members/login") ||
+               requestURI.startsWith("/api/members/logout") ||
+               requestURI.startsWith("/api/members/multipart") ||
+               requestURI.startsWith("/api/members/check-email") ||
+               requestURI.startsWith("/api/members/check-nickname") ||
+               requestURI.startsWith("/api/members/search-nickname") ||
+               requestURI.startsWith("/api/members/reset-password") ||
+               requestURI.startsWith("/api/members/refresh") ||
+               requestURI.startsWith("/api/members/test-cookies") ||
+               requestURI.startsWith("/api/members/recommended-calories") ||
+               requestURI.startsWith("/images/");
+    }
+
+    /**
+     * Check if this is a logout request
+     */
+    private boolean isLogoutRequest(String requestURI) {
+        return requestURI.startsWith("/api/members/logout");
     }
 }

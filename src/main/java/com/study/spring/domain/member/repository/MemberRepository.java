@@ -20,4 +20,5 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
     
     //Allows lookup for refresh-based authentication
     Optional<Member> findByRefreshToken(String refreshToken);
+	Optional<Member> findByNameAndEmail(String name, String email);
 } 

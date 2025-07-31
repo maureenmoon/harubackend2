@@ -8,8 +8,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class CookieUtil {
-	
-	//Cookie domain configuration
+    
+    //Cookie domain configuration
     @Value("${app.cookie.domain:localhost}")
     private String cookieDomain;
 
@@ -58,7 +58,7 @@ public class CookieUtil {
         Cookie cookie = new Cookie(name, null);
         cookie.setHttpOnly(true);
         cookie.setSecure(cookieSecure);
-//        cookie.setPath("/api/members");
+        cookie.setPath("/");
         cookie.setMaxAge(0);
         
         // Don't set domain for localhost cookies
@@ -67,7 +67,7 @@ public class CookieUtil {
         }
         
         // Set SameSite attribute for CSRF protection
-        String sameSite = "Lax"; // Use Lax for cross-site cookies
+        String sameSite = "Lax";
         String domainAttribute = (cookieDomain != null && !cookieDomain.isEmpty() && !"localhost".equals(cookieDomain)) ? "; Domain=" + cookieDomain : "";
         String cookieString = String.format("%s=; HttpOnly; Path=/; Max-Age=0; SameSite=%s%s%s", 
             name, sameSite,
@@ -76,7 +76,8 @@ public class CookieUtil {
         );
         
         System.out.println("🔧 COOKIE: Setting clear header: " + cookieString);
-        response.setHeader("Set-Cookie", cookieString);
+        // ✅ FIXED: Use addHeader instead of setHeader
+        response.addHeader("Set-Cookie", cookieString);
         
         // Also add the cookie using the traditional method as backup
         response.addCookie(cookie);
@@ -112,7 +113,7 @@ public class CookieUtil {
                 }
             }
         }
-        System.out.println("🔧 COOKIE: Cookie " + name + " not found");
+        System.out.println("�� COOKIE: Cookie " + name + " not found");
         return null;
     }
     
@@ -178,4 +179,4 @@ public class CookieUtil {
             }
         }
     }
-} 
+}

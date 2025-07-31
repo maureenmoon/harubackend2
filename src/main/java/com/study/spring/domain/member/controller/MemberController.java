@@ -1,30 +1,32 @@
 package com.study.spring.domain.member.controller;
 
 import com.study.spring.domain.member.dto.MemberDto;
+import com.study.spring.domain.email.EmailService;
 import com.study.spring.domain.member.dto.ImageProcessingResult;
 import com.study.spring.domain.member.entity.Member;
 import com.study.spring.domain.member.repository.MemberRepository;
 import com.study.spring.domain.member.service.MemberService;
 import com.study.spring.domain.member.util.ImageProcessingUtil;
+import com.study.spring.domain.security.config.SecurityConfig;
 import com.study.spring.domain.security.exception.CustomJWTException;
 import com.study.spring.domain.security.util.JWTUtil;
 import com.study.spring.domain.security.util.CookieUtil;
-
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import java.util.Optional;
+import java.util.Random;
 import java.util.HashMap;
 import java.time.LocalDate;
 import com.study.spring.domain.member.entity.Gender;
@@ -35,12 +37,16 @@ import com.study.spring.domain.member.entity.ActivityLevel;
 @RequestMapping("/api/members")
 @RequiredArgsConstructor
 public class MemberController {
+	
     private final MemberService memberService;
-    private final JWTUtil jwtUtil;
     private final MemberRepository memberRepository;
+    private final JWTUtil jwtUtil;
     private final CookieUtil cookieUtil;
     private final ImageProcessingUtil imageProcessingUtil;
+    private final PasswordEncoder passwordEncoder;
+    private final EmailService emailService;
 
+     
     // 회원 가입+프로필 이미지 생성
     @PostMapping(value = "/multipart", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<MemberDto.Response> createMemberWithImage(
@@ -84,30 +90,79 @@ public class MemberController {
     }
 
     // 로그아웃 - Cookie-based
+//    @PostMapping("/logout")
+//    public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse response) {
+//        System.out.println("🔧 LOGOUT: Logout request received");
+//        
+//        // 1. Clear cookies with proper domain/path matching
+//        System.out.println("🔧 LOGOUT: Clearing accessToken cookie");
+//        cookieUtil.clearCookie(response, "accessToken");
+//        
+//        System.out.println("🔧 LOGOUT: Clearing refreshToken cookie");
+//        cookieUtil.clearCookie(response, "refreshToken");
+//        
+//        System.out.println("🔧 LOGOUT: Clearing recommendedCalories cookie");
+//        cookieUtil.clearCookie(response, "recommendedCalories");
+//        
+//        System.out.println("🔧 LOGOUT: Clearing userData cookie");
+//        cookieUtil.clearCookie(response, "userData");
+//        
+//        // 2. Also clear from database (invalidate refresh token)
+//        Cookie[] cookies = request.getCookies();
+//        if (cookies != null) {
+//            for (Cookie cookie : cookies) {
+//                if ("refreshToken".equals(cookie.getName())) {
+//                    System.out.println("🔧 LOGOUT: Invalidating refresh token in database");
+//                    // Invalidate refresh token in database
+//                    memberRepository.findByRefreshToken(cookie.getValue())
+//                        .ifPresent(member -> {
+//                            member.updateRefreshToken(null);
+//                            memberRepository.save(member);
+//                            System.out.println("✅ LOGOUT: Refresh token invalidated for member ID: " + member.getId());
+//                        });
+//                    break;
+//                }
+//            }
+//        }
+//        
+//        // 3. Set additional headers to ensure cookie clearing and prevent caching
+//        response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+//        response.setHeader("Pragma", "no-cache");
+//        response.setHeader("Expires", "0");
+//        
+//        // Add additional debugging
+//        System.out.println("🔧 LOGOUT: Response headers after clearing cookies:");
+//        for (String headerName : response.getHeaderNames()) {
+//            System.out.println("🔧 LOGOUT: " + headerName + " = " + response.getHeader(headerName));
+//        }
+//        
+//        System.out.println("✅ LOGOUT: Logout completed successfully");
+//        return ResponseEntity.ok().build();
+//    }
+    
+ // 로그아웃 - Stateless JWT-based
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse response) {
         System.out.println("🔧 LOGOUT: Logout request received");
         
-        // 1. Clear cookies with proper domain/path matching
-        System.out.println("🔧 LOGOUT: Clearing accessToken cookie");
-        cookieUtil.clearCookie(response, "accessToken");
+        // 1. Clear ALL possible cookies using CookieUtil
+        String[] cookiesToClear = {
+            "accessToken", "refreshToken", "recommendedCalories", 
+            "userData", "frontendUserData", "todayCalories", 
+            "todayNutrients", "mealData"
+        };
         
-        System.out.println("🔧 LOGOUT: Clearing refreshToken cookie");
-        cookieUtil.clearCookie(response, "refreshToken");
+        for (String cookieName : cookiesToClear) {
+            System.out.println("�� LOGOUT: Clearing " + cookieName + " cookie");
+            cookieUtil.clearCookie(response, cookieName);
+        }
         
-        System.out.println("🔧 LOGOUT: Clearing recommendedCalories cookie");
-        cookieUtil.clearCookie(response, "recommendedCalories");
-        
-        System.out.println("🔧 LOGOUT: Clearing userData cookie");
-        cookieUtil.clearCookie(response, "userData");
-        
-        // 2. Also clear from database (invalidate refresh token)
+        // 2. Invalidate refresh token in database
         Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (Cookie cookie : cookies) {
                 if ("refreshToken".equals(cookie.getName())) {
                     System.out.println("🔧 LOGOUT: Invalidating refresh token in database");
-                    // Invalidate refresh token in database
                     memberRepository.findByRefreshToken(cookie.getValue())
                         .ifPresent(member -> {
                             member.updateRefreshToken(null);
@@ -119,21 +174,20 @@ public class MemberController {
             }
         }
         
-        // 3. Set additional headers to ensure cookie clearing and prevent caching
+        // 3. Set headers to prevent caching
         response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
         response.setHeader("Pragma", "no-cache");
         response.setHeader("Expires", "0");
         
-        // Add additional debugging
+        // 4. Add debugging
         System.out.println("🔧 LOGOUT: Response headers after clearing cookies:");
         for (String headerName : response.getHeaderNames()) {
-            System.out.println("🔧 LOGOUT: " + headerName + " = " + response.getHeader(headerName));
+            System.out.println("�� LOGOUT: " + headerName + " = " + response.getHeader(headerName));
         }
         
         System.out.println("✅ LOGOUT: Logout completed successfully");
         return ResponseEntity.ok().build();
     }
-
     // ID로 회원 조회
     @GetMapping("/id/{id}")
     public ResponseEntity<MemberDto.Response> getMember(@PathVariable("id") Long id) {
@@ -163,11 +217,12 @@ public class MemberController {
         return ResponseEntity.ok(memberService.updateMemberWithImage(id, request, profileImage));
     }
     
-    // 비밀번호 변경
+    // 비밀번호 변경(로그인-마이페이지에서)
     @PatchMapping("/{id}/password")
     public ResponseEntity<Void> updatePassword(
             @PathVariable("id") Long id,
-            @RequestParam String newPassword) {
+//            @RequestParam String newPassword) {
+    	  @RequestParam("newPassword") String newPassword) {  // Add explicit parameter name
         memberService.updatePassword(id, newPassword);
         return ResponseEntity.noContent().build();
     }
@@ -287,7 +342,7 @@ public class MemberController {
         return ResponseEntity.ok(memberService.searchMembers(query));
     }
 
-        // 닉네임 찾기
+    // 닉네임 찾기
     @PostMapping("/search-nickname")
     public ResponseEntity<?> searchNickname(@RequestBody Map<String, String> payload) {
         String name = payload.get("name");
@@ -297,17 +352,50 @@ public class MemberController {
             .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("message", "No user found")));
     }
-     // 비밀번호 재설정 요청
+    
+    // 비밀번호 재설정 요청(비로그인 상태에서)
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@RequestBody Map<String, String> payload) {
+        String name = payload.get("name");
         String email = payload.get("email");
-        boolean result = memberService.requestPasswordReset(email);
-        if (result) {
-            return ResponseEntity.ok(Map.of("message", "Password reset email sent"));
-        } else {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(Map.of("message", "No user found"));
+        
+        try {
+            // Find member by name and email
+            Optional<Member> memberOpt = memberRepository.findByNameAndEmail(name, email);
+            
+            if (memberOpt.isPresent()) {
+                Member member = memberOpt.get();
+                
+                // Generate temporary password
+                String temporaryPassword = generateTemporaryPassword();
+                
+                // Update member's password
+                member.setPassword(passwordEncoder.encode(temporaryPassword));
+                memberRepository.save(member);
+                
+                // Send email with temporary password
+                emailService.sendPasswordResetEmail(email, name, temporaryPassword);
+                
+                return ResponseEntity.ok(Map.of("message", "임시 비밀번호가 이메일로 발송되었습니다."));
+            } else {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "해당 정보로 등록된 회원을 찾을 수 없습니다."));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("message", "비밀번호 재설정 중 오류가 발생했습니다."));
         }
+    }
+
+    private String generateTemporaryPassword() {
+        // Generate 8-character random password
+        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        StringBuilder sb = new StringBuilder();
+        Random random = new Random();
+        for (int i = 0; i < 8; i++) {
+            sb.append(chars.charAt(random.nextInt(chars.length())));
+        }
+        return sb.toString();
     }
     //security
     @GetMapping("/me")
